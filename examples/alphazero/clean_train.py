@@ -58,6 +58,9 @@ class Config(BaseModel):
     file_name: str = os.path.basename(__file__) if '__file__' in globals() else ipynbname.name()+".ipynb"
     num_devices:int = len(jax.local_devices())
     device_kind:str = jax.local_devices()[0].device_kind
+    # stopping
+    limit_simulator_evaluations: int = 2 * 10**9
+
             
 
 
@@ -287,7 +290,7 @@ if __name__ == "__main__":
     iteration: int = 0
     hours: float = 0.0
     frames: int = 0
-    log = {"iteration": iteration, "hours": hours, "frames": frames}
+    log = {"iteration": iteration, "hours": hours, "frames": frames, "cost/simulator_evaluations/total": 0}
 
     rng_key = jax.random.PRNGKey(config.seed)
     while True:
@@ -327,11 +330,12 @@ if __name__ == "__main__":
         print(log)
         wandb.log(log)
 
-        if iteration >= config.max_num_iters:
+        if iteration >= config.max_num_iters or log["cost/simulator_evaluations/total"] >= config.limit_simulator_evaluations:
             break
 
         iteration += 1
-        log = {"iteration": iteration}
+        log = {"iteration": iteration, "cost/iteration":iteration}
+
         st = time.time()
 
         # Selfplay
