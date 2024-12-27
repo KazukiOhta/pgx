@@ -39,7 +39,7 @@ num_devices = len(devices)
 class Config(BaseModel):
     env_id: pgx.EnvId = "go_9x9"
     seed: int = 0
-    max_num_iters: int = 400
+    max_num_iters: int = 500
     # network params
     num_channels: int = 128
     num_layers: int = 6
@@ -53,6 +53,16 @@ class Config(BaseModel):
     learning_rate: float = 0.001
     # eval params
     eval_interval: int = 5
+    # logging
+    host_name: str = os.uname().nodename
+    file_name: str = os.path.basename(__file__) if '__file__' in globals() else ipynbname.name()+".ipynb"
+    num_devices:int = len(jax.local_devices())
+    device_kind:str = jax.local_devices()[0].device_kind
+    # stopping
+    limit_simulator_evaluations: int = 2 * 10**9
+
+            
+
 
     class Config:
         extra = "forbid"
@@ -243,6 +253,7 @@ def evaluate(rng_key, my_model):
         (my_logits, _), _ = forward.apply(
             my_model_params, my_model_state, state.observation, is_eval=True
         )
+        my_logits = 10000 * my_logits
         opp_logits, _ = baseline(state.observation)
         is_my_turn = (state.current_player == my_player).reshape((-1, 1))
         logits = jnp.where(is_my_turn, my_logits, opp_logits)
@@ -272,14 +283,14 @@ if __name__ == "__main__":
     # Prepare checkpoint dir
     now = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=9)))
     now = now.strftime("%Y%m%d%H%M%S")
-    ckpt_dir = os.path.join("checkpoints", f"{config.env_id}_{now}")
+    ckpt_dir = os.path.join("/home/mil/ota/data/sandbox/checkpoints", f"{config.env_id}_{now}")
     os.makedirs(ckpt_dir, exist_ok=True)
 
     # Initialize logging dict
     iteration: int = 0
     hours: float = 0.0
     frames: int = 0
-    log = {"iteration": iteration, "hours": hours, "frames": frames}
+    log = {"iteration": iteration, "hours": hours, "frames": frames, "cost/simulator_evaluations/total": 0}
 
     rng_key = jax.random.PRNGKey(config.seed)
     while True:
@@ -296,10 +307,12 @@ if __name__ == "__main__":
                     f"eval/vs_baseline/lose_rate": ((R == -1).sum() / R.size).item(),
                 }
             )
+            log["score/vs_baseline_100"] = 0.5 * R.mean().item() + 0.5
+
 
             # Store checkpoints
             model_0, opt_state_0 = jax.tree_util.tree_map(lambda x: x[0], (model, opt_state))
-            with open(os.path.join(ckpt_dir, f"{iteration:06d}.ckpt"), "wb") as f:
+            with open(os.path.join(ckpt_dir, "last.ckpt"), "wb") as f:
                 dic = {
                     "config": config,
                     "rng_key": rng_key,
@@ -317,11 +330,12 @@ if __name__ == "__main__":
         print(log)
         wandb.log(log)
 
-        if iteration >= config.max_num_iters:
+        if iteration >= config.max_num_iters or log["cost/simulator_evaluations/total"] >= config.limit_simulator_evaluations:
             break
 
         iteration += 1
-        log = {"iteration": iteration}
+        log = {"iteration": iteration, "cost/iteration":iteration}
+
         st = time.time()
 
         # Selfplay
@@ -354,6 +368,8 @@ if __name__ == "__main__":
 
         et = time.time()
         hours += (et - st) / 3600
+
+        # Logging
         log.update(
             {
                 "train/policy_loss": policy_loss,
@@ -362,3 +378,12 @@ if __name__ == "__main__":
                 "frames": frames,
             }
         )
+        sim_play = config.selfplay_batch_size * 1 * config.max_num_steps * iteration
+        sim_plan = config.selfplay_batch_size * config.num_simulations * config.max_num_steps * iteration
+        log["cost/simulator_evaluations/planning"] = sim_plan
+        log["cost/simulator_evaluations/playing"] = sim_play
+        log["cost/simulator_evaluations/total"] = sim_plan + sim_play
+        log["cost/simulator_evaluations/total [million]"] = (sim_plan + sim_play) / (10**6)
+        log["cost/hours/total"] = hours
+        log["cost/gpu_hours/total"] = hours * config.num_devices
+
