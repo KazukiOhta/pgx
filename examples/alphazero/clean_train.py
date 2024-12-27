@@ -280,7 +280,7 @@ if __name__ == "__main__":
     # Prepare checkpoint dir
     now = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=9)))
     now = now.strftime("%Y%m%d%H%M%S")
-    ckpt_dir = os.path.join("checkpoints", f"{config.env_id}_{now}")
+    ckpt_dir = os.path.join("/home/mil/ota/data/sandbox/checkpoints", f"{config.env_id}_{now}")
     os.makedirs(ckpt_dir, exist_ok=True)
 
     # Initialize logging dict
@@ -309,7 +309,7 @@ if __name__ == "__main__":
 
             # Store checkpoints
             model_0, opt_state_0 = jax.tree_util.tree_map(lambda x: x[0], (model, opt_state))
-            with open(os.path.join(ckpt_dir, f"{iteration:06d}.ckpt"), "wb") as f:
+            with open(os.path.join(ckpt_dir, "last.ckpt"), "wb") as f:
                 dic = {
                     "config": config,
                     "rng_key": rng_key,
@@ -374,12 +374,12 @@ if __name__ == "__main__":
                 "frames": frames,
             }
         )
-        sim_play = config.selfplay_batch_size * 1 * max_num_steps * iteration
-        sim_plan = config.selfplay_batch_size * num_simulations * max_num_steps * iteration
+        sim_play = config.selfplay_batch_size * 1 * config.max_num_steps * iteration
+        sim_plan = config.selfplay_batch_size * config.num_simulations * config.max_num_steps * iteration
         log["cost/simulator_evaluations/planning"] = sim_plan
         log["cost/simulator_evaluations/playing"] = sim_play
         log["cost/simulator_evaluations/total"] = sim_plan + sim_play
         log["cost/simulator_evaluations/total [million]"] = (sim_plan + sim_play) / (10**6)
         log["cost/hours/total"] = hours
-        log["cost/gpu_hours/total"] = hours * num_devices
+        log["cost/gpu_hours/total"] = hours * config.num_devices
 
